@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gold Counter — OCR集計</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root{
+    --bg:#0d0907; --panel:#16100c; --panel2:#120c08; --edge:#2a1d12;
+    --gold:#e8b94a; --gold-dim:#8a6c2e; --txt:#e9dcc4; --mut:#9b8a6a;
+    --hot:#ff5a3c; --ok:#7bd88f;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh;
+    background:radial-gradient(120% 80% at 50% -10%, #1c130b 0%, var(--bg) 60%);
+    color:var(--txt);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:28px 18px 60px}
+  header{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;
+    border-bottom:1px solid var(--edge);padding-bottom:14px}
+  h1{font-size:22px;margin:0;letter-spacing:.04em;
+    font-family:Georgia,"Times New Roman",serif;color:var(--gold)}
+  .sub{font-size:12px;color:var(--mut);letter-spacing:.12em}
+
+  .drop{
+    display:block;
+    border:1.5px dashed var(--gold-dim);border-radius:10px;
+    background:linear-gradient(180deg,#140e09,#0f0a06);
+    padding:34px 20px;text-align:center;cursor:pointer;
+    transition:border-color .15s,background .15s;
+  }
+  .drop:hover,.drop.over{border-color:var(--gold);background:#1a1209}
+  .drop .big{font-size:15px;color:var(--txt)}
+  .drop .hint{font-size:12px;color:var(--mut);margin-top:6px}
+  .drop kbd{font-family:monospace;background:#241a10;border:1px solid var(--edge);
+    border-radius:4px;padding:1px 6px;color:var(--gold)}
+  #file{display:none}
+
+  .total{
+    margin-top:22px;border:1px solid var(--edge);border-radius:10px;
+    background:var(--panel);padding:18px 22px;display:none;
+    position:sticky;top:10px;z-index:5;
+    box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .total.on{display:block}
+  .total .toprow{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  .total .lbl{font-size:11px;letter-spacing:.18em;color:var(--mut);text-transform:uppercase}
+  .total .val{font-family:Georgia,serif;font-size:38px;color:var(--gold);
+    line-height:1.1;margin-top:4px;font-variant-numeric:tabular-nums}
+  .total .val small{font-size:17px;color:var(--gold-dim);margin-left:8px}
+  .total .meta{font-size:12px;color:var(--mut);margin-top:8px}
+  .clearAll{background:none;border:1px solid var(--edge);color:var(--mut);
+    border-radius:6px;padding:8px 14px;cursor:pointer;font:inherit;font-size:12px;
+    letter-spacing:.06em;white-space:nowrap;flex:none}
+  .clearAll:hover{border-color:var(--hot);color:var(--hot)}
+
+  .fees{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    margin-top:14px;padding-top:14px;border-top:1px solid #1c140d}
+  .fees .lab{font-size:11px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-right:4px}
+  .feebtn{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;
+    color:var(--txt);border:1px solid var(--edge);background:#0f0a06;
+    border-radius:6px;padding:6px 12px;user-select:none;transition:border-color .12s,background .12s}
+  .feebtn:hover{border-color:var(--gold-dim)}
+  .feebtn.on{border-color:var(--gold);background:#1a1209;color:var(--gold)}
+  .feebtn .box{width:14px;height:14px;border:1px solid var(--gold-dim);border-radius:3px;
+    display:inline-flex;align-items:center;justify-content:center;font-size:11px;line-height:1}
+  .feebtn.on .box{background:var(--gold);border-color:var(--gold);color:#120c08}
+  .feebtn.on .box::after{content:"✓"}
+  .net{font-size:13px;color:var(--ok);margin-top:12px;font-variant-numeric:tabular-nums;display:none}
+  .net.on{display:block}
+
+  .cards{margin-top:22px;display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  @media(max-width:560px){.cards{grid-template-columns:1fr}}
+  .card{border:1px solid var(--edge);border-radius:10px;background:var(--panel2);
+    overflow:hidden;display:flex;flex-direction:column}
+  .card .head{display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border-bottom:1px solid #1c140d;background:#160f09}
+  .card .thumb{width:48px;height:48px;border-radius:6px;object-fit:cover;
+    border:1px solid var(--edge);background:#000;flex:none}
+  .card .info{flex:1;min-width:0}
+  .card .fname{font-size:12px;color:var(--txt);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .card .sub2{font-size:11px;color:var(--mut);margin-top:3px;font-variant-numeric:tabular-nums}
+  .card .subtotal{color:var(--gold);font-variant-numeric:tabular-nums}
+  .card .del{flex:none;cursor:pointer;color:var(--mut);font-size:13px;
+    border:1px solid var(--edge);background:none;border-radius:6px;padding:6px 9px}
+  .card .del:hover{color:var(--hot);border-color:var(--hot);background:#1f110d}
+
+  .card .body{padding:8px 10px 12px}
+  .cardbar{height:3px;background:#231811;border-radius:3px;overflow:hidden;margin:0 0 8px}
+  .cardbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold-dim),var(--gold));transition:width .2s}
+  .cstatus{font-size:11px;color:var(--mut);margin-bottom:6px;min-height:14px}
+  .cstatus.err{color:var(--hot)}
+
+  .row{display:flex;align-items:center;gap:8px;padding:4px 2px;
+    font-variant-numeric:tabular-nums}
+  .row .n{width:20px;color:var(--mut);font-size:11px;text-align:right}
+  .row input{flex:1;background:#0f0a06;border:1px solid var(--edge);border-radius:5px;
+    color:var(--txt);font:inherit;font-size:14px;padding:5px 8px;
+    font-variant-numeric:tabular-nums;text-align:right}
+  .row input:focus{outline:none;border-color:var(--gold-dim)}
+  .row .g{color:var(--gold-dim);font-size:12px;width:12px}
+  .row .x{cursor:pointer;color:var(--mut);font-size:16px;line-height:1;padding:0 5px;border-radius:4px}
+  .row .x:hover{color:var(--hot);background:#1f110d}
+  .addrow{margin-top:8px;background:none;border:1px dashed var(--edge);color:var(--mut);
+    border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit;font-size:12px;width:100%}
+  .addrow:hover{border-color:var(--gold-dim);color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Gold Counter</h1>
+    <span class="sub">OCR集計 / ローカル処理</span>
+  </header>
+
+  <label class="drop" id="drop" for="file">
+    <div class="big">スクショをドロップ、またはクリックして選択（複数可）</div>
+    <div class="hint"><kbd>Ctrl+V</kbd> で貼り付けもOK・画像は端末内だけで処理されます</div>
+  </label>
+  <input type="file" id="file" accept="image/*" multiple>
+
+  <div class="total" id="total">
+    <div class="toprow">
+      <div>
+        <div class="lbl">総合計</div>
+        <div class="val"><span id="sum">0</span><small>G</small></div>
+        <div class="meta" id="meta"></div>
+      </div>
+      <button class="clearAll" id="clearAll">すべて消去</button>
+    </div>
+    <div class="fees">
+      <span class="lab">手数料</span>
+      <label class="feebtn" data-fee="3"><span class="box"></span>3%</label>
+      <label class="feebtn" data-fee="5"><span class="box"></span>5%</label>
+    </div>
+    <div class="net" id="net"></div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const drop=$('#drop'), fileInput=$('#file'),
+      totalBox=$('#total'), sumEl=$('#sum'), metaEl=$('#meta'), netEl=$('#net'),
+      cardsBox=$('#cards'), clearAll=$('#clearAll');
+
+const fmt = n => n.toLocaleString('en-US');
+let uid = 0;
+let feeRate = 0; // 0 / 3 / 5
+const items = [];
+
+function preprocess(img){
+  const scale = Math.min(3, Math.max(2, 1400 / img.width));
+  const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx=c.getContext('2d');
+  ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+  ctx.drawImage(img,0,0,w,h);
+  const d=ctx.getImageData(0,0,w,h), p=d.data;
+  const hist=new Array(256).fill(0);
+  for(let i=0;i<p.length;i+=4){
+    const g=(p[i]*0.299+p[i+1]*0.587+p[i+2]*0.114)|0;
+    p[i]=p[i+1]=p[i+2]=g; hist[g]++;
+  }
+  const total=w*h; let sum=0; for(let t=0;t<256;t++) sum+=t*hist[t];
+  let sumB=0,wB=0,max=0,thr=128;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(!wB)continue; const wF=total-wB; if(!wF)break;
+    sumB+=t*hist[t];
+    const mB=sumB/wB, mF=(sum-sumB)/wF, between=wB*wF*(mB-mF)*(mB-mF);
+    if(between>max){max=between;thr=t;}
+  }
+  for(let i=0;i<p.length;i+=4){
+    const v=p[i]>thr?0:255; p[i]=p[i+1]=p[i+2]=v;
+  }
+  ctx.putImageData(d,0,0);
+  return c;
+}
+
+function parseNumbers(text){
+  const out=[];
+  text.split(/\n/).forEach(line=>{
+    let s=line.replace(/[Oo]/g,'0').replace(/[lI|]/g,'1').replace(/[Ss]/g,'5');
+    const m=s.match(/\d{1,3}(?:[,.\s]\d{3})+|\d{4,}/g);
+    if(!m)return;
+    m.forEach(tok=>{
+      const n=parseInt(tok.replace(/[,.\s]/g,''),10);
+      if(!isNaN(n)&&n>0) out.push(n);
+    });
+  });
+  return out;
+}
+
+function recalcAll(){
+  let grand=0, count=0;
+  items.forEach(it=>{
+    const sub=it.values.reduce((a,b)=>a+(b||0),0);
+    grand+=sub; count+=it.values.length;
+    it.subtotalEl.textContent=fmt(sub);
+    it.countEl.textContent=it.values.length+' 件';
+  });
+  sumEl.textContent=fmt(grand);
+  metaEl.textContent='画像 '+items.length+' 枚 / 合計 '+count+' 件';
+  totalBox.classList.toggle('on', items.length>0);
+  if(feeRate>0 && grand>0){
+    const fee=Math.round(grand*feeRate/100);
+    const net=grand-fee;
+    netEl.textContent='手数料 '+feeRate+'%（-'+fmt(fee)+' G）→ 手取り '+fmt(net)+' G';
+    netEl.classList.add('on');
+  }else{
+    netEl.classList.remove('on');
+  }
+}
+
+function renderRows(it){
+  it.rowlistEl.innerHTML='';
+  it.values.forEach((v,i)=>{
+    const row=document.createElement('div'); row.className='row';
+    row.innerHTML='<span class="n">'+(i+1)+'</span>'+
+      '<input value="'+fmt(v)+'" inputmode="numeric">'+
+      '<span class="g">G</span><span class="x" title="削除">×</span>';
+    const inp=row.querySelector('input');
+    inp.addEventListener('input',function(){
+      const n=parseInt(inp.value.replace(/[^\d]/g,''),10);
+      it.values[i]=isNaN(n)?0:n; recalcAll();
+    });
+    inp.addEventListener('blur',function(){ inp.value=fmt(it.values[i]||0); });
+    row.querySelector('.x').addEventListener('click',function(){
+      it.values.splice(i,1); renderRows(it); recalcAll();
+    });
+    it.rowlistEl.appendChild(row);
+  });
+}
+
+function makeCard(name, thumbUrl){
+  const id=++uid;
+  const el=document.createElement('div'); el.className='card';
+  el.innerHTML=
+    '<div class="head">'+
+      '<img class="thumb" src="'+thumbUrl+'" alt="">'+
+      '<div class="info">'+
+        '<div class="fname" title="'+name+'">'+name+'</div>'+
+        '<div class="sub2"><span class="cnt">0 件</span> ・ 小計 <span class="subtotal">0</span> G</div>'+
+      '</div>'+
+      '<button class="del" title="この画像を削除">削除</button>'+
+    '</div>'+
+    '<div class="body">'+
+      '<div class="cardbar"><i></i></div>'+
+      '<div class="cstatus">前処理中…</div>'+
+      '<div class="rowlist"></div>'+
+      '<button class="addrow">＋ 行を追加</button>'+
+    '</div>';
+  const it={
+    id, name, values:[], el,
+    statusEl:el.querySelector('.cstatus'),
+    barEl:el.querySelector('.cardbar i'),
+    rowlistEl:el.querySelector('.rowlist'),
+    subtotalEl:el.querySelector('.subtotal'),
+    countEl:el.querySelector('.cnt'),
+  };
+  el.querySelector('.del').addEventListener('click',function(){
+    const idx=items.indexOf(it);
+    if(idx>-1) items.splice(idx,1);
+    el.remove(); recalcAll();
+  });
+  el.querySelector('.addrow').addEventListener('click',function(){
+    it.values.push(0); renderRows(it); recalcAll();
+  });
+  items.push(it);
+  cardsBox.appendChild(el);
+  return it;
+}
+
+async function run(file){
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=async function(){
+    const it=makeCard(file.name||'image', url);
+    recalcAll();
+    try{
+      const canvas=preprocess(img);
+      it.statusEl.textContent='文字認識中…';
+      const result=await Tesseract.recognize(canvas,'eng',{
+        logger:function(m){ if(m.status==='recognizing text') it.barEl.style.width=Math.round(m.progress*100)+'%'; },
+        tessedit_char_whitelist:'0123456789,. ',
+      });
+      it.barEl.style.width='100%';
+      it.values=parseNumbers(result.data.text);
+      if(!it.values.length){
+        it.statusEl.textContent='数字を検出できず。「＋ 行を追加」で手入力できます。';
+        it.statusEl.classList.add('err');
+      }else{
+        it.statusEl.textContent='完了。誤読は各欄で修正できます。';
+      }
+      renderRows(it); recalcAll();
+    }catch(e){
+      it.statusEl.textContent='OCRエラー: '+e.message; it.statusEl.classList.add('err');
+    }
+  };
+  img.src=url;
+}
+
+function handleFiles(list){
+  Array.prototype.slice.call(list).filter(function(f){return f.type.startsWith('image/');}).forEach(run);
+}
+
+clearAll.addEventListener('click',function(){
+  items.splice(0).forEach(function(it){it.el.remove();});
+  recalcAll();
+});
+
+document.querySelectorAll('.feebtn').forEach(function(btn){
+  btn.addEventListener('click',function(){
+    const r=parseInt(btn.dataset.fee,10);
+    feeRate = (feeRate===r) ? 0 : r; // 同じものを再クリックで解除
+    document.querySelectorAll('.feebtn').forEach(function(b){
+      b.classList.toggle('on', parseInt(b.dataset.fee,10)===feeRate);
+    });
+    recalcAll();
+  });
+});
+
+fileInput.addEventListener('change',function(e){ handleFiles(e.target.files); fileInput.value=''; });
+['dragenter','dragover'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('over');});});
+['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('over');});});
+drop.addEventListener('drop',function(e){handleFiles(e.dataTransfer.files);});
+window.addEventListener('paste',function(e){
+  const imgs=Array.prototype.slice.call(e.clipboardData.items).filter(function(i){return i.type.startsWith('image/');}).map(function(i){return i.getAsFile();});
+  if(imgs.length) handleFiles(imgs);
+});
+</script>
+</body>
+</html>
